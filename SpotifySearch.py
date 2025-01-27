@@ -5,7 +5,7 @@ import requests
 from urllib.parse import quote
 import io
 
-__version__ = (1, 0, 1)
+__version__ = (1, 0, 2)
 #       █████  ██████   ██████ ███████  ██████  ██████   ██████ 
 #       ██   ██ ██   ██ ██      ██      ██      ██    ██ ██      
 #       ███████ ██████  ██      █████   ██      ██    ██ ██      
@@ -96,68 +96,75 @@ class SpotifySearchMod(loader.Module):
 
     async def spotifydlcmd(self, message: Message):
         """<ссылка> Скачать трек Spotify по ссылке. Можно ответить на сообщение со ссылкой или указать ссылку напрямую."""
-        
-        # Проверяем аргументы команды
         url = utils.get_args_raw(message)
-        
-        # Если нет прямой ссылки, проверяем ответ на сообщение
+
         if not url and message.is_reply:
             reply = await message.get_reply_message()
             url = reply.raw_text
-            
-        # Если все еще нет ссылки, просим её указать
+
         if not url:
             await utils.answer(message, "❌ Укажите ссылку на трек Spotify или ответьте на сообщение со ссылкой")
             return
-            
+
         try:
-            # Получаем информацию о треке
             track_id = url.split("/")[-1].split("?")[0]
             response = requests.get(f"https://api.paxsenix.biz.id/spotify/track?id={track_id}")
             response.raise_for_status()
             track = response.json()
-            
+
             duration_seconds = track['duration_ms'] // 1000
             artist_name = ', '.join(a['name'] for a in track['artists'])
             track_name = track['name']
-            
-            # Скачиваем трек
+
             await utils.answer(message, self.strings["downloading"])
-            response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(url)}&serv=spotify")
-            data = response.json()
 
-            if data.get("ok"):
-                audio_response = requests.get(data["directUrl"])
-                audio_content = io.BytesIO(audio_response.content)
-                audio_content.name = f"{artist_name} - {track_name}.m4a"
+            servers = ["spotify", "spotify2", "spotify3", "yt", "yt2", "yt3", "deezer"]
+            track_downloaded = False
 
-                attributes = [
-                    DocumentAttributeAudio(
-                        duration=duration_seconds,
+            for server in servers:
+                await utils.answer(message, f"⏳ Пытаюсь скачать трек с сервера {server}...")
+
+                response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(url)}&serv={server}")
+                data = response.json()
+
+                if data.get("ok"):
+                    audio_response = requests.get(data["directUrl"])
+                    audio_content = io.BytesIO(audio_response.content)
+
+                    file_extension = "m4a" if server in ["spotify", "spotify2", "spotify3"] else "mp3"
+                    audio_content.name = f"{artist_name} - {track_name}.{file_extension}"
+
+                    attributes = [
+                        DocumentAttributeAudio(
+                            duration=duration_seconds,
+                            title=track_name,
+                            performer=artist_name,
+                            waveform=None
+                        )
+                    ]
+
+                    mime_type = 'audio/mp4' if server in ["spotify", "spotify2", "spotify3"] else 'audio/mp3'
+
+                    await self._client.send_file(
+                        message.chat_id,
+                        audio_content,
+                        attributes=attributes,
                         title=track_name,
                         performer=artist_name,
-                        waveform=None
+                        supports_streaming=True,
+                        mime_type=mime_type,
+                        caption=f"🎵 {artist_name} - {track_name}"
                     )
-                ]
 
-                await self._client.send_file(
-                    message.chat_id,
-                    audio_content,
-                    attributes=attributes,
-                    title=track_name,
-                    performer=artist_name,
-                    supports_streaming=True,
-                    mime_type='audio/mp4',
-                    caption=f"🎵 {artist_name} - {track_name}"
-                )
-                
-                await utils.answer(message, self.strings["download_success"])
-            else:
+                    await utils.answer(message, self.strings["download_success"])
+                    track_downloaded = True
+                    break
+
+            if not track_downloaded:
                 await utils.answer(message, self.strings["download_failed"])
+
         except Exception as e:
             await utils.answer(message, self.strings["download_error"].format(error=str(e)))
-
-
 
     async def search_and_show_tracks(self, message: Message, query: str):
         try:
@@ -236,39 +243,52 @@ class SpotifySearchMod(loader.Module):
         except Exception as e:
             await call.edit(text=self.strings["search_error_generic"].format(error=str(e)))
 
-    async def download_track(self, call, url: str, title: str, artist: str, duration: int):
+    async def download_track(self, call, track_url: str, track_name: str, artist_name: str, duration: int):
+        servers = ["spotify", "spotify2", "spotify3", "yt", "yt2", "yt3", "deezer"]
+        track_downloaded = False
+
         try:
-            await call.edit(text=self.strings["downloading"])
-            response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(url)}&serv=spotify")
-            data = response.json()
+            for server in servers:
+                await call.edit(text=f"⏳ Пытаюсь скачать трек с сервера {server}...")
 
-            if data.get("ok"):
-                audio_response = requests.get(data["directUrl"])
-                audio_content = io.BytesIO(audio_response.content)
-                audio_content.name = f"{artist} - {title}.m4a"
+                response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(track_url)}&serv={server}")
+                data = response.json()
 
-                attributes = [
-                    DocumentAttributeAudio(
-                        duration=duration,
-                        title=title,
-                        performer=artist,
-                        waveform=None
+                if data.get("ok"):
+                    audio_response = requests.get(data["directUrl"])
+                    audio_content = io.BytesIO(audio_response.content)
+
+                    file_extension = "m4a" if server in ["spotify", "spotify2", "spotify3"] else "mp3"
+                    audio_content.name = f"{artist_name} - {track_name}.{file_extension}"
+
+                    attributes = [
+                        DocumentAttributeAudio(
+                            duration=duration,
+                            title=track_name,
+                            performer=artist_name,
+                            waveform=None
+                        )
+                    ]
+
+                    mime_type = 'audio/mp4' if server in ["spotify", "spotify2", "spotify3"] else 'audio/mp3'
+
+                    await self._client.send_file(
+                        call.form["chat"],
+                        audio_content,
+                        attributes=attributes,
+                        title=track_name,
+                        performer=artist_name,
+                        supports_streaming=True,
+                        mime_type=mime_type,
+                        caption=f"🎵 {artist_name} - {track_name}"
                     )
-                ]
 
-                await self._client.send_file(
-                    call.form["chat"],
-                    audio_content,
-                    attributes=attributes,
-                    title=title,
-                    performer=artist,
-                    supports_streaming=True,
-                    mime_type='audio/mp4',
-                    caption=f"🎵 {artist} - {title}"
-                )
-                
-                await call.edit(text=self.strings["download_success"])
-            else:
+                    await call.edit(text=self.strings["download_success"])
+                    track_downloaded = True
+                    break
+
+            if not track_downloaded:
                 await call.edit(text=self.strings["download_failed"])
+
         except Exception as e:
             await call.edit(text=self.strings["download_error"].format(error=str(e)))
