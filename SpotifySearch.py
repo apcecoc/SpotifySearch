@@ -5,8 +5,10 @@ import requests
 from urllib.parse import quote
 import io
 import json
+import time
+import asyncio
 
-__version__ = (1, 0, 4)  
+__version__ = (1, 0, 4)
 
 #       █████  ██████   ██████ ███████  ██████  ██████   ██████ 
 #       ██   ██ ██   ██ ██      ██      ██      ██    ██ ██      
@@ -53,7 +55,8 @@ class SpotifySearchMod(loader.Module):
         "podcast_download_success": "✅ Podcast successfully downloaded!",
         "download_failed": "❌ Failed to download content",
         "downloading": "⏳ Downloading from {server}: {progress}",
-        "api_response_error": "❌ API returned an invalid response (possibly HTML). Please try again later."
+        "api_response_error": "❌ API returned an invalid response (possibly HTML). Please try again later.",
+        "rate_limit_error": "❌ Too many requests to the API. Please wait {seconds} seconds and try again."
     }
 
     strings_ru = {
@@ -82,12 +85,14 @@ class SpotifySearchMod(loader.Module):
         "podcast_download_success": "✅ Подкаст успешно загружен!",
         "download_failed": "❌ Не удалось скачать контент",
         "downloading": "⏳ Загрузка с {server}: {progress}",
-        "api_response_error": "❌ API вернул некорректный ответ (возможно, HTML). Попробуйте позже."
+        "api_response_error": "❌ API вернул некорректный ответ (возможно, HTML). Попробуйте позже.",
+        "rate_limit_error": "❌ Слишком много запросов к API. Пожалуйста, подождите {seconds} секунд и попробуйте снова."
     }
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "SEARCH_LIMIT", 50, "Максимальное количество результатов поиска"
+            "SEARCH_LIMIT", 50, "Максимальное количество результатов поиска",
+            "RATE_LIMIT_DELAY", 10, "Задержка (в секундах) перед повторной попыткой после ошибки 429"
         )
         self.search_results = {}
         self.current_search = None
@@ -146,11 +151,13 @@ class SpotifySearchMod(loader.Module):
             api_endpoint = "episode" if is_podcast else "track"
             response = requests.get(f"https://api.paxsenix.biz.id/spotify/{api_endpoint}?id={content_id}")
             response.raise_for_status()
-            content = response.json()
+            content = response.text
 
-            if not self.is_valid_json(response.text):
+            if not self.is_valid_json(content):
                 await utils.answer(message, self.strings["api_response_error"])
                 return
+
+            content = response.json()
 
             duration_seconds = content['duration_ms'] // 1000
             if is_podcast:
@@ -166,66 +173,78 @@ class SpotifySearchMod(loader.Module):
             content_downloaded = False
 
             for server in servers:
-                await utils.answer(message, self.strings["downloading"].format(server=server, progress="0% (0 MB)"))
+                try:
+                    await utils.answer(message, self.strings["downloading"].format(server=server, progress="0% (0 MB)"))
 
-                response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(url)}&serv={server}")
-                response.raise_for_status()
-                data = response.json()
+                    response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(url)}&serv={server}")
+                    response.raise_for_status()
+                    data = response.text
 
-                if not self.is_valid_json(response.text):
-                    await utils.answer(message, self.strings["api_response_error"])
-                    return
+                    if not self.is_valid_json(data):
+                        await utils.answer(message, self.strings["api_response_error"])
+                        return
 
-                if data.get("ok"):
-                    audio_response = requests.get(data["directUrl"], stream=True)
-                    audio_response.raise_for_status()
-                    total_size = int(audio_response.headers.get('content-length', 0))
-                    downloaded = 0
-                    audio_content = io.BytesIO()
+                    data = response.json()
 
-                    for chunk in audio_response.iter_content(chunk_size=1024 * 1024):
-                        if chunk:
-                            downloaded += len(chunk)
-                            audio_content.write(chunk)
-                            progress = self.format_progress(downloaded, total_size)
-                            await utils.answer(message, self.strings["downloading"].format(server=server, progress=progress))
+                    if data.get("ok"):
+                        audio_response = requests.get(data["directUrl"], stream=True)
+                        audio_response.raise_for_status()
+                        total_size = int(audio_response.headers.get('content-length', 0))
+                        downloaded = 0
+                        audio_content = io.BytesIO()
 
-                    audio_content.seek(0)
-                    file_extension = "m4a" if server in ["spotify", "spotify2", "spotify3"] else "mp3"
-                    audio_content.name = f"{creator_name} - {content_name}.{file_extension}"
+                        for chunk in audio_response.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                downloaded += len(chunk)
+                                audio_content.write(chunk)
+                                progress = self.format_progress(downloaded, total_size)
+                                await utils.answer(message, self.strings["downloading"].format(server=server, progress=progress))
 
-                    attributes = [
-                        DocumentAttributeAudio(
-                            duration=duration_seconds,
+                        audio_content.seek(0)
+                        file_extension = "m4a" if server in ["spotify", "spotify2", "spotify3"] else "mp3"
+                        audio_content.name = f"{creator_name} - {content_name}.{file_extension}"
+
+                        attributes = [
+                            DocumentAttributeAudio(
+                                duration=duration_seconds,
+                                title=content_name,
+                                performer=creator_name,
+                                waveform=None
+                            )
+                        ]
+
+                        mime_type = 'audio/mp4' if server in ["spotify", "spotify2", "spotify3"] else 'audio/mp3'
+
+                        thumb = None
+                        if cover_url:
+                            cover_response = requests.get(cover_url)
+                            thumb = io.BytesIO(cover_response.content)
+                            thumb.name = "cover.jpg"
+
+                        await self._client.send_file(
+                            message.chat_id,
+                            audio_content,
+                            attributes=attributes,
                             title=content_name,
                             performer=creator_name,
-                            waveform=None
+                            supports_streaming=True,
+                            mime_type=mime_type,
+                            thumb=thumb,
+                            caption=f"{'🎙️' if is_podcast else '🎵'} {creator_name} - {content_name}"
                         )
-                    ]
 
-                    mime_type = 'audio/mp4' if server in ["spotify", "spotify2", "spotify3"] else 'audio/mp3'
+                        await utils.answer(message, self.strings["podcast_download_success"] if is_podcast else self.strings["download_success"])
+                        content_downloaded = True
+                        break
 
-                    thumb = None
-                    if cover_url:
-                        cover_response = requests.get(cover_url)
-                        thumb = io.BytesIO(cover_response.content)
-                        thumb.name = "cover.jpg"
-
-                    await self._client.send_file(
-                        message.chat_id,
-                        audio_content,
-                        attributes=attributes,
-                        title=content_name,
-                        performer=creator_name,
-                        supports_streaming=True,
-                        mime_type=mime_type,
-                        thumb=thumb,
-                        caption=f"{'🎙️' if is_podcast else '🎵'} {creator_name} - {content_name}"
-                    )
-
-                    await utils.answer(message, self.strings["podcast_download_success"] if is_podcast else self.strings["download_success"])
-                    content_downloaded = True
-                    break
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 429:
+                        wait_time = self.config["RATE_LIMIT_DELAY"]
+                        await utils.answer(message, self.strings["rate_limit_error"].format(seconds=wait_time))
+                        await asyncio.sleep(wait_time)
+                        continue  # Пробуем следующий сервер после задержки
+                    else:
+                        raise e
 
             if not content_downloaded:
                 await utils.answer(message, self.strings["download_failed"])
@@ -367,66 +386,78 @@ class SpotifySearchMod(loader.Module):
                 artist_name = content.get('name', 'Unknown')
 
             for server in servers:
-                await call.edit(text=self.strings["downloading"].format(server=server, progress="0% (0 MB)"))
+                try:
+                    await call.edit(text=self.strings["downloading"].format(server=server, progress="0% (0 MB)"))
 
-                response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(track_url)}&serv={server}")
-                response.raise_for_status()
-                data = response.json()
+                    response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(track_url)}&serv={server}")
+                    response.raise_for_status()
+                    data = response.text
 
-                if not self.is_valid_json(response.text):
-                    await call.edit(self.strings["api_response_error"])
-                    return
+                    if not self.is_valid_json(data):
+                        await call.edit(self.strings["api_response_error"])
+                        return
 
-                if data.get("ok"):
-                    audio_response = requests.get(data["directUrl"], stream=True)
-                    audio_response.raise_for_status()
-                    total_size = int(audio_response.headers.get('content-length', 0))
-                    downloaded = 0
-                    audio_content = io.BytesIO()
+                    data = response.json()
 
-                    for chunk in audio_response.iter_content(chunk_size=1024 * 1024):
-                        if chunk:
-                            downloaded += len(chunk)
-                            audio_content.write(chunk)
-                            progress = self.format_progress(downloaded, total_size)
-                            await call.edit(text=self.strings["downloading"].format(server=server, progress=progress))
+                    if data.get("ok"):
+                        audio_response = requests.get(data["directUrl"], stream=True)
+                        audio_response.raise_for_status()
+                        total_size = int(audio_response.headers.get('content-length', 0))
+                        downloaded = 0
+                        audio_content = io.BytesIO()
 
-                    audio_content.seek(0)
-                    file_extension = "m4a" if server in ["spotify", "spotify2", "spotify3"] else "mp3"
-                    audio_content.name = f"{artist_name} - {track_name}.{file_extension}"
+                        for chunk in audio_response.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                downloaded += len(chunk)
+                                audio_content.write(chunk)
+                                progress = self.format_progress(downloaded, total_size)
+                                await call.edit(text=self.strings["downloading"].format(server=server, progress=progress))
 
-                    attributes = [
-                        DocumentAttributeAudio(
-                            duration=duration,
+                        audio_content.seek(0)
+                        file_extension = "m4a" if server in ["spotify", "spotify2", "spotify3"] else "mp3"
+                        audio_content.name = f"{artist_name} - {track_name}.{file_extension}"
+
+                        attributes = [
+                            DocumentAttributeAudio(
+                                duration=duration,
+                                title=track_name,
+                                performer=artist_name,
+                                waveform=None
+                            )
+                        ]
+
+                        mime_type = 'audio/mp4' if server in ["spotify", "spotify2", "spotify3"] else 'audio/mp3'
+
+                        thumb = None
+                        if cover_url:
+                            cover_response = requests.get(cover_url)
+                            thumb = io.BytesIO(cover_response.content)
+                            thumb.name = "cover.jpg"
+
+                        await self._client.send_file(
+                            call.form["chat"],
+                            audio_content,
+                            attributes=attributes,
                             title=track_name,
                             performer=artist_name,
-                            waveform=None
+                            supports_streaming=True,
+                            mime_type=mime_type,
+                            thumb=thumb,
+                            caption=f"{'🎙️' if is_podcast else '🎵'} {artist_name} - {track_name}"
                         )
-                    ]
 
-                    mime_type = 'audio/mp4' if server in ["spotify", "spotify2", "spotify3"] else 'audio/mp3'
+                        await call.edit(text=self.strings["podcast_download_success"] if is_podcast else self.strings["download_success"])
+                        content_downloaded = True
+                        break
 
-                    thumb = None
-                    if cover_url:
-                        cover_response = requests.get(cover_url)
-                        thumb = io.BytesIO(cover_response.content)
-                        thumb.name = "cover.jpg"
-
-                    await self._client.send_file(
-                        call.form["chat"],
-                        audio_content,
-                        attributes=attributes,
-                        title=track_name,
-                        performer=artist_name,
-                        supports_streaming=True,
-                        mime_type=mime_type,
-                        thumb=thumb,
-                        caption=f"{'🎙️' if is_podcast else '🎵'} {artist_name} - {track_name}"
-                    )
-
-                    await call.edit(text=self.strings["podcast_download_success"] if is_podcast else self.strings["download_success"])
-                    content_downloaded = True
-                    break
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 429:
+                        wait_time = self.config["RATE_LIMIT_DELAY"]
+                        await call.edit(text=self.strings["rate_limit_error"].format(seconds=wait_time))
+                        await asyncio.sleep(wait_time)
+                        continue  # Пробуем следующий сервер после задержки
+                    else:
+                        raise e
 
             if not content_downloaded:
                 await call.edit(text=self.strings["download_failed"])
