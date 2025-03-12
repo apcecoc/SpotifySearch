@@ -4,8 +4,9 @@ from telethon.tl.types import DocumentAttributeAudio
 import requests
 from urllib.parse import quote
 import io
+import json
 
-__version__ = (1, 0, 4)
+__version__ = (1, 0, 4)  
 
 #       █████  ██████   ██████ ███████  ██████  ██████   ██████ 
 #       ██   ██ ██   ██ ██      ██      ██      ██    ██ ██      
@@ -21,7 +22,7 @@ __version__ = (1, 0, 4)
 
 # meta developer: @apcecoc
 # scope: hikka_only
-# scope: hikka_min 1.2.10  
+# scope: hikka_min 1.2.10
 
 @loader.tds
 class SpotifySearchMod(loader.Module):
@@ -52,6 +53,7 @@ class SpotifySearchMod(loader.Module):
         "podcast_download_success": "✅ Podcast successfully downloaded!",
         "download_failed": "❌ Failed to download content",
         "downloading": "⏳ Downloading from {server}: {progress}",
+        "api_response_error": "❌ API returned an invalid response (possibly HTML). Please try again later."
     }
 
     strings_ru = {
@@ -80,6 +82,7 @@ class SpotifySearchMod(loader.Module):
         "podcast_download_success": "✅ Подкаст успешно загружен!",
         "download_failed": "❌ Не удалось скачать контент",
         "downloading": "⏳ Загрузка с {server}: {progress}",
+        "api_response_error": "❌ API вернул некорректный ответ (возможно, HTML). Попробуйте позже."
     }
 
     def __init__(self):
@@ -100,6 +103,14 @@ class SpotifySearchMod(loader.Module):
             return f"{progress_percent}% ({downloaded // 1024 // 1024} MB / {total_size // 1024 // 1024} MB)"
         else:
             return f"{downloaded // 1024 // 1024} MB"
+
+    def is_valid_json(self, data):
+        """Проверяет, является ли строка валидным JSON"""
+        try:
+            json.loads(data)
+            return True
+        except json.JSONDecodeError:
+            return False
 
     async def spotifycmd(self, message: Message):
         """<название трека> Поиск и скачивание треков Spotify."""
@@ -137,9 +148,13 @@ class SpotifySearchMod(loader.Module):
             response.raise_for_status()
             content = response.json()
 
+            if not self.is_valid_json(response.text):
+                await utils.answer(message, self.strings["api_response_error"])
+                return
+
             duration_seconds = content['duration_ms'] // 1000
             if is_podcast:
-                creator_name = content.get('show', {}).get('name', 'Unknown')  # Используем show.name вместо publisher
+                creator_name = content.get('name', 'Unknown')
             else:
                 creator_name = ', '.join(a['name'] for a in content['artists']) if 'artists' in content else 'Unknown'
             content_name = content['name']
@@ -154,7 +169,12 @@ class SpotifySearchMod(loader.Module):
                 await utils.answer(message, self.strings["downloading"].format(server=server, progress="0% (0 MB)"))
 
                 response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(url)}&serv={server}")
+                response.raise_for_status()
                 data = response.json()
+
+                if not self.is_valid_json(response.text):
+                    await utils.answer(message, self.strings["api_response_error"])
+                    return
 
                 if data.get("ok"):
                     audio_response = requests.get(data["directUrl"], stream=True)
@@ -210,6 +230,8 @@ class SpotifySearchMod(loader.Module):
             if not content_downloaded:
                 await utils.answer(message, self.strings["download_failed"])
 
+        except requests.RequestException as e:
+            await utils.answer(message, self.strings["download_error"].format(error=str(e)))
         except Exception as e:
             await utils.answer(message, self.strings["download_error"].format(error=str(e)))
 
@@ -220,6 +242,12 @@ class SpotifySearchMod(loader.Module):
                 headers={"Accept": "application/json"}
             )
             response.raise_for_status()
+            content = response.text
+
+            if not self.is_valid_json(content):
+                await utils.answer(message, self.strings["api_response_error"])
+                return
+
             data = response.json()
 
             if "tracks" not in data or "items" not in data["tracks"]:
@@ -236,6 +264,8 @@ class SpotifySearchMod(loader.Module):
 
             await self.show_search_results(message, tracks)
 
+        except requests.RequestException as e:
+            await utils.answer(message, self.strings["search_error_generic"].format(error=str(e)))
         except Exception as e:
             await utils.answer(message, self.strings["search_error_generic"].format(error=str(e)))
 
@@ -261,6 +291,12 @@ class SpotifySearchMod(loader.Module):
         try:
             response = requests.get(f"https://api.paxsenix.biz.id/spotify/track?id={track_id}")
             response.raise_for_status()
+            content = response.text
+
+            if not self.is_valid_json(content):
+                await call.edit(self.strings["api_response_error"])
+                return
+
             track = response.json()
 
             duration_seconds = track['duration_ms'] // 1000
@@ -274,8 +310,14 @@ class SpotifySearchMod(loader.Module):
             if is_podcast:
                 response = requests.get(f"https://api.paxsenix.biz.id/spotify/episode?id={track_id}")
                 response.raise_for_status()
+                content = response.text
+
+                if not self.is_valid_json(content):
+                    await call.edit(self.strings["api_response_error"])
+                    return
+
                 track = response.json()
-                artist_name = track.get('show', {}).get('name', 'Unknown')  # Используем show.name вместо publisher
+                artist_name = track.get('name', 'Unknown')
 
             text = self.strings["podcast_info" if is_podcast else "track_info"].format(
                 title=track_name,
@@ -296,8 +338,10 @@ class SpotifySearchMod(loader.Module):
             ]
 
             await call.edit(text=text, reply_markup=markup)
+        except requests.RequestException as e:
+            await call.edit(self.strings["search_error_generic"].format(error=str(e)))
         except Exception as e:
-            await call.edit(text=self.strings["search_error_generic"].format(error=str(e)))
+            await call.edit(self.strings["search_error_generic"].format(error=str(e)))
 
     async def download_track(self, call, track_url: str, track_name: str, artist_name: str, duration: int):
         servers = ["spotify", "spotify2", "spotify3", "yt", "yt2", "yt3", "deezer"]
@@ -309,18 +353,29 @@ class SpotifySearchMod(loader.Module):
             content_id = track_url.split("/")[-1].split("?")[0]
             response = requests.get(f"https://api.paxsenix.biz.id/spotify/{api_endpoint}?id={content_id}")
             response.raise_for_status()
+            content = response.text
+
+            if not self.is_valid_json(content):
+                await call.edit(self.strings["api_response_error"])
+                return
+
             content = response.json()
             cover_url = (content['album']['images'][0]['url'] if not is_podcast and 'album' in content 
                         else content['images'][0]['url'] if 'images' in content 
                         else None)
             if is_podcast:
-                artist_name = content.get('show', {}).get('name', 'Unknown')  # Используем show.name вместо publisher
+                artist_name = content.get('name', 'Unknown')
 
             for server in servers:
                 await call.edit(text=self.strings["downloading"].format(server=server, progress="0% (0 MB)"))
 
                 response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(track_url)}&serv={server}")
+                response.raise_for_status()
                 data = response.json()
+
+                if not self.is_valid_json(response.text):
+                    await call.edit(self.strings["api_response_error"])
+                    return
 
                 if data.get("ok"):
                     audio_response = requests.get(data["directUrl"], stream=True)
@@ -376,5 +431,7 @@ class SpotifySearchMod(loader.Module):
             if not content_downloaded:
                 await call.edit(text=self.strings["download_failed"])
 
+        except requests.RequestException as e:
+            await call.edit(self.strings["download_error"].format(error=str(e)))
         except Exception as e:
-            await call.edit(text=self.strings["download_error"].format(error=str(e)))
+            await call.edit(self.strings["download_error"].format(error=str(e)))
