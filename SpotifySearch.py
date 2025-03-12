@@ -5,7 +5,7 @@ import requests
 from urllib.parse import quote
 import io
 
-__version__ = (1, 0, 3)  
+__version__ = (1, 0, 4)
 
 #       █████  ██████   ██████ ███████  ██████  ██████   ██████ 
 #       ██   ██ ██   ██ ██      ██      ██      ██    ██ ██      
@@ -21,7 +21,7 @@ __version__ = (1, 0, 3)
 
 # meta developer: @apcecoc
 # scope: hikka_only
-# scope: hikka_min 1.2.10
+# scope: hikka_min 1.2.10  
 
 @loader.tds
 class SpotifySearchMod(loader.Module):
@@ -139,7 +139,7 @@ class SpotifySearchMod(loader.Module):
 
             duration_seconds = content['duration_ms'] // 1000
             if is_podcast:
-                creator_name = content.get('show', {}).get('publisher', 'Unknown')
+                creator_name = content.get('show', {}).get('name', 'Unknown')  # Используем show.name вместо publisher
             else:
                 creator_name = ', '.join(a['name'] for a in content['artists']) if 'artists' in content else 'Unknown'
             content_name = content['name']
@@ -275,7 +275,7 @@ class SpotifySearchMod(loader.Module):
                 response = requests.get(f"https://api.paxsenix.biz.id/spotify/episode?id={track_id}")
                 response.raise_for_status()
                 track = response.json()
-                artist_name = track.get('show', {}).get('publisher', 'Unknown')
+                artist_name = track.get('show', {}).get('name', 'Unknown')  # Используем show.name вместо publisher
 
             text = self.strings["podcast_info" if is_podcast else "track_info"].format(
                 title=track_name,
@@ -314,7 +314,7 @@ class SpotifySearchMod(loader.Module):
                         else content['images'][0]['url'] if 'images' in content 
                         else None)
             if is_podcast:
-                artist_name = content.get('show', {}).get('publisher', 'Unknown')
+                artist_name = content.get('show', {}).get('name', 'Unknown')  # Используем show.name вместо publisher
 
             for server in servers:
                 await call.edit(text=self.strings["downloading"].format(server=server, progress="0% (0 MB)"))
