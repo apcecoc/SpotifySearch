@@ -8,7 +8,7 @@ import json
 import time
 import asyncio
 
-__version__ = (1, 0, 4)
+__version__ = (1, 0, 5)
 
 #       █████  ██████   ██████ ███████  ██████  ██████   ██████ 
 #       ██   ██ ██   ██ ██      ██      ██      ██    ██ ██      
@@ -244,7 +244,7 @@ class SpotifySearchMod(loader.Module):
                         await asyncio.sleep(wait_time)
                         continue  # Пробуем следующий сервер после задержки
                     else:
-                        raise e
+                        continue  # Переходим к следующему серверу при любой другой HTTP-ошибке
 
             if not content_downloaded:
                 await utils.answer(message, self.strings["download_failed"])
@@ -457,7 +457,7 @@ class SpotifySearchMod(loader.Module):
                         await asyncio.sleep(wait_time)
                         continue  # Пробуем следующий сервер после задержки
                     else:
-                        raise e
+                        continue  # Переходим к следующему серверу при любой другой HTTP-ошибке
 
             if not content_downloaded:
                 await call.edit(text=self.strings["download_failed"])
