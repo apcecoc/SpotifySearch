@@ -8,7 +8,7 @@ import json
 import time
 import asyncio
 
-__version__ = (1, 0, 5)
+__version__ = (1, 0, 6)
 
 #       █████  ██████   ██████ ███████  ██████  ██████   ██████ 
 #       ██   ██ ██   ██ ██      ██      ██      ██    ██ ██      
@@ -169,7 +169,7 @@ class SpotifySearchMod(loader.Module):
                         else content['images'][0]['url'] if 'images' in content 
                         else None)
 
-            servers = ["spotify", "spotify2", "spotify3", "yt", "yt2", "yt3", "deezer"]
+            servers = ["spotify", "spotify3", "yt", "yt2", "yt3", "deezer"]
             content_downloaded = False
 
             for server in servers:
@@ -187,7 +187,11 @@ class SpotifySearchMod(loader.Module):
                     data = response.json()
 
                     if data.get("ok"):
-                        audio_response = requests.get(data["directUrl"], stream=True)
+                        direct_url = data.get("directUrl")
+                        if not direct_url or not isinstance(direct_url, str):
+                            continue  # Пропускаем сервер, если URL пустой или некорректный
+
+                        audio_response = requests.get(direct_url, stream=True)
                         audio_response.raise_for_status()
                         total_size = int(audio_response.headers.get('content-length', 0))
                         downloaded = 0
@@ -201,7 +205,7 @@ class SpotifySearchMod(loader.Module):
                                 await utils.answer(message, self.strings["downloading"].format(server=server, progress=progress))
 
                         audio_content.seek(0)
-                        file_extension = "m4a" if server in ["spotify", "spotify2", "spotify3"] else "mp3"
+                        file_extension = "m4a" if server in ["spotify", "spotify3"] else "mp3"
                         audio_content.name = f"{creator_name} - {content_name}.{file_extension}"
 
                         attributes = [
@@ -213,7 +217,7 @@ class SpotifySearchMod(loader.Module):
                             )
                         ]
 
-                        mime_type = 'audio/mp4' if server in ["spotify", "spotify2", "spotify3"] else 'audio/mp3'
+                        mime_type = 'audio/mp4' if server in ["spotify", "spotify3"] else 'audio/mp3'
 
                         thumb = None
                         if cover_url:
@@ -363,7 +367,7 @@ class SpotifySearchMod(loader.Module):
             await call.edit(self.strings["search_error_generic"].format(error=str(e)))
 
     async def download_track(self, call, track_url: str, track_name: str, artist_name: str, duration: int):
-        servers = ["spotify", "spotify2", "spotify3", "yt", "yt2", "yt3", "deezer"]
+        servers = ["spotify", "spotify3", "yt", "yt2", "yt3", "deezer"]
         content_downloaded = False
         is_podcast = "/episode/" in track_url
 
@@ -400,7 +404,11 @@ class SpotifySearchMod(loader.Module):
                     data = response.json()
 
                     if data.get("ok"):
-                        audio_response = requests.get(data["directUrl"], stream=True)
+                        direct_url = data.get("directUrl")
+                        if not direct_url or not isinstance(direct_url, str):
+                            continue  # Пропускаем сервер, если URL пустой или некорректный
+
+                        audio_response = requests.get(direct_url, stream=True)
                         audio_response.raise_for_status()
                         total_size = int(audio_response.headers.get('content-length', 0))
                         downloaded = 0
@@ -414,7 +422,7 @@ class SpotifySearchMod(loader.Module):
                                 await call.edit(text=self.strings["downloading"].format(server=server, progress=progress))
 
                         audio_content.seek(0)
-                        file_extension = "m4a" if server in ["spotify", "spotify2", "spotify3"] else "mp3"
+                        file_extension = "m4a" if server in ["spotify", "spotify3"] else "mp3"
                         audio_content.name = f"{artist_name} - {track_name}.{file_extension}"
 
                         attributes = [
@@ -426,7 +434,7 @@ class SpotifySearchMod(loader.Module):
                             )
                         ]
 
-                        mime_type = 'audio/mp4' if server in ["spotify", "spotify2", "spotify3"] else 'audio/mp3'
+                        mime_type = 'audio/mp4' if server in ["spotify", "spotify3"] else 'audio/mp3'
 
                         thumb = None
                         if cover_url:
