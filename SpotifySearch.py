@@ -101,7 +101,6 @@ class SpotifySearchMod(loader.Module):
         """Инициализация клиента"""
         self.client = client
         self.db = db
-        # Проверяем, что self.config определён
         if not hasattr(self, 'config'):
             self.config = loader.ModuleConfig(
                 loader.ConfigValue("SEARCH_LIMIT", 50, "Максимальное количество результатов поиска"),
@@ -200,7 +199,7 @@ class SpotifySearchMod(loader.Module):
                     if data.get("ok"):
                         direct_url = data.get("directUrl")
                         if not direct_url or not isinstance(direct_url, str):
-                            continue  # Пропускаем сервер, если URL пустой или некорректный
+                            continue
 
                         audio_response = requests.get(direct_url, stream=True)
                         audio_response.raise_for_status()
@@ -257,9 +256,9 @@ class SpotifySearchMod(loader.Module):
                         wait_time = self.config["RATE_LIMIT_DELAY"]
                         await utils.answer(message, self.strings["rate_limit_error"].format(seconds=wait_time))
                         await asyncio.sleep(wait_time)
-                        continue  # Пробуем следующий сервер после задержки
+                        continue
                     else:
-                        continue  # Переходим к следующему серверу при любой другой HTTP-ошибке
+                        continue
 
             if not content_downloaded:
                 await utils.answer(message, self.strings["download_failed"])
@@ -417,7 +416,7 @@ class SpotifySearchMod(loader.Module):
                     if data.get("ok"):
                         direct_url = data.get("directUrl")
                         if not direct_url or not isinstance(direct_url, str):
-                            continue  # Пропускаем сервер, если URL пустой или некорректный
+                            continue
 
                         audio_response = requests.get(direct_url, stream=True)
                         audio_response.raise_for_status()
@@ -474,9 +473,9 @@ class SpotifySearchMod(loader.Module):
                         wait_time = self.config["RATE_LIMIT_DELAY"]
                         await call.edit(text=self.strings["rate_limit_error"].format(seconds=wait_time))
                         await asyncio.sleep(wait_time)
-                        continue  # Пробуем следующий сервер после задержки
+                        continue
                     else:
-                        continue  # Переходим к следующему серверу при любой другой HTTP-ошибке
+                        continue
 
             if not content_downloaded:
                 await call.edit(text=self.strings["download_failed"])
