@@ -8,7 +8,7 @@ import json
 import time
 import asyncio
 
-__version__ = (1, 0, 6)
+__version__ = (1, 0, 7)
 
 #       █████  ██████   ██████ ███████  ██████  ██████   ██████ 
 #       ██   ██ ██   ██ ██      ██      ██      ██    ██ ██      
@@ -91,11 +91,22 @@ class SpotifySearchMod(loader.Module):
 
     def __init__(self):
         self.config = loader.ModuleConfig(
-            "SEARCH_LIMIT", 50, "Максимальное количество результатов поиска",
-            "RATE_LIMIT_DELAY", 10, "Задержка (в секундах) перед повторной попыткой после ошибки 429"
+            loader.ConfigValue("SEARCH_LIMIT", 50, "Максимальное количество результатов поиска"),
+            loader.ConfigValue("RATE_LIMIT_DELAY", 10, "Задержка (в секундах) перед повторной попыткой после ошибки 429")
         )
         self.search_results = {}
         self.current_search = None
+
+    async def client_ready(self, client, db):
+        """Инициализация клиента"""
+        self.client = client
+        self.db = db
+        # Проверяем, что self.config определён
+        if not hasattr(self, 'config'):
+            self.config = loader.ModuleConfig(
+                loader.ConfigValue("SEARCH_LIMIT", 50, "Максимальное количество результатов поиска"),
+                loader.ConfigValue("RATE_LIMIT_DELAY", 10, "Задержка (в секундах) перед повторной попыткой после ошибки 429")
+            )
 
     def format_duration(self, seconds: int) -> str:
         minutes = seconds // 60
