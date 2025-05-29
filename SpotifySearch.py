@@ -54,9 +54,10 @@ class SpotifySearchMod(loader.Module):
         "download_success": "✅ Track successfully downloaded!",
         "podcast_download_success": "✅ Podcast successfully downloaded!",
         "download_failed": "❌ Failed to download content",
-        "downloading": "⏳ Downloading from {server}: {progress}",
+        "downloading": "⏳ Downloading, please wait...",
         "api_response_error": "❌ API returned an invalid response (possibly HTML). Please try again later.",
-        "rate_limit_error": "❌ Too many requests to the API. Please wait {seconds} seconds and try again."
+        "rate_limit_error": "❌ Too many requests to the API. Please wait {seconds} seconds and try again.",
+        "bot_not_responding": "❌ The download bot is not responding. Please try again later."
     }
 
     strings_ru = {
@@ -84,9 +85,10 @@ class SpotifySearchMod(loader.Module):
         "download_success": "✅ Трек успешно загружен!",
         "podcast_download_success": "✅ Подкаст успешно загружен!",
         "download_failed": "❌ Не удалось скачать контент",
-        "downloading": "⏳ Загрузка с {server}: {progress}",
+        "downloading": "⏳ Загрузка, пожалуйста, подождите...",
         "api_response_error": "❌ API вернул некорректный ответ (возможно, HTML). Попробуйте позже.",
-        "rate_limit_error": "❌ Слишком много запросов к API. Пожалуйста, подождите {seconds} секунд и попробуйте снова."
+        "rate_limit_error": "❌ Слишком много запросов к API. Пожалуйста, подождите {seconds} секунд и попробуйте снова.",
+        "bot_not_responding": "❌ Бот для скачивания не отвечает. Пожалуйста, попробуйте снова позже."
     }
 
     def __init__(self):
@@ -96,6 +98,7 @@ class SpotifySearchMod(loader.Module):
         )
         self.search_results = {}
         self.current_search = None
+        self.download_bot = "@MusicsHuntersbot"
 
     async def client_ready(self, client, db):
         """Инициализация клиента"""
@@ -111,13 +114,6 @@ class SpotifySearchMod(loader.Module):
         minutes = seconds // 60
         remaining_seconds = seconds % 60
         return f"{minutes}:{remaining_seconds:02d}"
-
-    def format_progress(self, downloaded: int, total_size: int) -> str:
-        if total_size > 0:
-            progress_percent = int((downloaded / total_size) * 100)
-            return f"{progress_percent}% ({downloaded // 1024 // 1024} MB / {total_size // 1024 // 1024} MB)"
-        else:
-            return f"{downloaded // 1024 // 1024} MB"
 
     def is_valid_json(self, data):
         """Проверяет, является ли строка валидным JSON"""
@@ -179,88 +175,29 @@ class SpotifySearchMod(loader.Module):
                         else content['images'][0]['url'] if 'images' in content 
                         else None)
 
-            servers = ["youtube", "spotify", "spotdl", "deezer"]
-            content_downloaded = False
+            await utils.answer(message, self.strings["downloading"])
+            track_message = await self.download_via_bot(message.chat_id, url, content_name, creator_name, duration_seconds, is_podcast)
 
-            for server in servers:
-                try:
-                    await utils.answer(message, self.strings["downloading"].format(server=server, progress="0% (0 MB)"))
+            if track_message:
+                thumb = None
+                if cover_url:
+                    cover_response = requests.get(cover_url)
+                    thumb = io.BytesIO(cover_response.content)
+                    thumb.name = "cover.jpg"
 
-                    response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(url)}&serv={server}")
-                    response.raise_for_status()
-                    data = response.text
+                await self._client.send_file(
+                    message.chat_id,
+                    track_message.media,
+                    attributes=track_message.media.document.attributes,
+                    title=content_name,
+                    performer=creator_name,
+                    supports_streaming=True,
+                    thumb=thumb,
+                    caption=f"{'🎙️' if is_podcast else '🎵'} {creator_name} - {content_name}"
+                )
 
-                    if not self.is_valid_json(data):
-                        await utils.answer(message, self.strings["api_response_error"])
-                        return
-
-                    data = response.json()
-
-                    if data.get("ok"):
-                        direct_url = data.get("directUrl")
-                        if not direct_url or not isinstance(direct_url, str):
-                            continue
-
-                        audio_response = requests.get(direct_url, stream=True)
-                        audio_response.raise_for_status()
-                        total_size = int(audio_response.headers.get('content-length', 0))
-                        downloaded = 0
-                        audio_content = io.BytesIO()
-
-                        for chunk in audio_response.iter_content(chunk_size=1024 * 1024):
-                            if chunk:
-                                downloaded += len(chunk)
-                                audio_content.write(chunk)
-                                progress = self.format_progress(downloaded, total_size)
-                                await utils.answer(message, self.strings["downloading"].format(server=server, progress=progress))
-
-                        audio_content.seek(0)
-                        file_extension = "m4a" if server in ["spotify"] else "mp3"
-                        audio_content.name = f"{creator_name} - {content_name}.{file_extension}"
-
-                        attributes = [
-                            DocumentAttributeAudio(
-                                duration=duration_seconds,
-                                title=content_name,
-                                performer=creator_name,
-                                waveform=None
-                            )
-                        ]
-
-                        mime_type = 'audio/mp4' if server in ["spotify"] else 'audio/mp3'
-
-                        thumb = None
-                        if cover_url:
-                            cover_response = requests.get(cover_url)
-                            thumb = io.BytesIO(cover_response.content)
-                            thumb.name = "cover.jpg"
-
-                        await self._client.send_file(
-                            message.chat_id,
-                            audio_content,
-                            attributes=attributes,
-                            title=content_name,
-                            performer=creator_name,
-                            supports_streaming=True,
-                            mime_type=mime_type,
-                            thumb=thumb,
-                            caption=f"{'🎙️' if is_podcast else '🎵'} {creator_name} - {content_name}"
-                        )
-
-                        await utils.answer(message, self.strings["podcast_download_success"] if is_podcast else self.strings["download_success"])
-                        content_downloaded = True
-                        break
-
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 429:
-                        wait_time = self.config["RATE_LIMIT_DELAY"]
-                        await utils.answer(message, self.strings["rate_limit_error"].format(seconds=wait_time))
-                        await asyncio.sleep(wait_time)
-                        continue
-                    else:
-                        continue
-
-            if not content_downloaded:
+                await utils.answer(message, self.strings["podcast_download_success"] if is_podcast else self.strings["download_success"])
+            else:
                 await utils.answer(message, self.strings["download_failed"])
 
         except requests.RequestException as e:
@@ -377,8 +314,6 @@ class SpotifySearchMod(loader.Module):
             await call.edit(self.strings["search_error_generic"].format(error=str(e)))
 
     async def download_track(self, call, track_url: str, track_name: str, artist_name: str, duration: int):
-        servers = ["youtube", "spotify", "spotdl", "deezer"]
-        content_downloaded = False
         is_podcast = "/episode/" in track_url
 
         try:
@@ -399,88 +334,60 @@ class SpotifySearchMod(loader.Module):
             if is_podcast:
                 artist_name = content.get('name', 'Unknown')
 
-            for server in servers:
-                try:
-                    await call.edit(text=self.strings["downloading"].format(server=server, progress="0% (0 MB)"))
+            await call.edit(text=self.strings["downloading"])
+            track_message = await self.download_via_bot(call.form["chat"], track_url, track_name, artist_name, duration, is_podcast)
 
-                    response = requests.get(f"https://api.paxsenix.biz.id/dl/spotify?url={quote(track_url)}&serv={server}")
-                    response.raise_for_status()
-                    data = response.text
+            if track_message:
+                thumb = None
+                if cover_url:
+                    cover_response = requests.get(cover_url)
+                    thumb = io.BytesIO(cover_response.content)
+                    thumb.name = "cover.jpg"
 
-                    if not self.is_valid_json(data):
-                        await call.edit(self.strings["api_response_error"])
-                        return
+                await self._client.send_file(
+                    call.form["chat"],
+                    track_message.media,
+                    attributes=track_message.media.document.attributes,
+                    title=track_name,
+                    performer=artist_name,
+                    supports_streaming=True,
+                    thumb=thumb,
+                    caption=f"{'🎙️' if is_podcast else '🎵'} {artist_name} - {track_name}"
+                )
 
-                    data = response.json()
-
-                    if data.get("ok"):
-                        direct_url = data.get("directUrl")
-                        if not direct_url or not isinstance(direct_url, str):
-                            continue
-
-                        audio_response = requests.get(direct_url, stream=True)
-                        audio_response.raise_for_status()
-                        total_size = int(audio_response.headers.get('content-length', 0))
-                        downloaded = 0
-                        audio_content = io.BytesIO()
-
-                        for chunk in audio_response.iter_content(chunk_size=1024 * 1024):
-                            if chunk:
-                                downloaded += len(chunk)
-                                audio_content.write(chunk)
-                                progress = self.format_progress(downloaded, total_size)
-                                await call.edit(text=self.strings["downloading"].format(server=server, progress=progress))
-
-                        audio_content.seek(0)
-                        file_extension = "m4a" if server in ["spotify"] else "mp3"
-                        audio_content.name = f"{artist_name} - {track_name}.{file_extension}"
-
-                        attributes = [
-                            DocumentAttributeAudio(
-                                duration=duration,
-                                title=track_name,
-                                performer=artist_name,
-                                waveform=None
-                            )
-                        ]
-
-                        mime_type = 'audio/mp4' if server in ["spotify"] else 'audio/mp3'
-
-                        thumb = None
-                        if cover_url:
-                            cover_response = requests.get(cover_url)
-                            thumb = io.BytesIO(cover_response.content)
-                            thumb.name = "cover.jpg"
-
-                        await self._client.send_file(
-                            call.form["chat"],
-                            audio_content,
-                            attributes=attributes,
-                            title=track_name,
-                            performer=artist_name,
-                            supports_streaming=True,
-                            mime_type=mime_type,
-                            thumb=thumb,
-                            caption=f"{'🎙️' if is_podcast else '🎵'} {artist_name} - {track_name}"
-                        )
-
-                        await call.edit(text=self.strings["podcast_download_success"] if is_podcast else self.strings["download_success"])
-                        content_downloaded = True
-                        break
-
-                except requests.exceptions.HTTPError as e:
-                    if e.response.status_code == 429:
-                        wait_time = self.config["RATE_LIMIT_DELAY"]
-                        await call.edit(text=self.strings["rate_limit_error"].format(seconds=wait_time))
-                        await asyncio.sleep(wait_time)
-                        continue
-                    else:
-                        continue
-
-            if not content_downloaded:
+                await call.edit(text=self.strings["podcast_download_success"] if is_podcast else self.strings["download_success"])
+            else:
                 await call.edit(text=self.strings["download_failed"])
 
         except requests.RequestException as e:
             await call.edit(self.strings["download_error"].format(error=str(e)))
         except Exception as e:
             await call.edit(self.strings["download_error"].format(error=str(e)))
+
+    async def download_via_bot(self, original_chat_id: int, track_url: str, track_name: str, artist_name: str, duration: int, is_podcast: bool):
+        """Скачивание трека"""
+        try:
+            bot_chat = await self.client.get_entity(self.download_bot)
+            bot_chat_id = bot_chat.id
+            await self.client.send_message(bot_chat_id, "/start")
+            await asyncio.sleep(1)
+
+            sent_message = await self.client.send_message(bot_chat_id, track_url)
+
+            track_message = None
+            for _ in range(20):
+                messages = await self.client.get_messages(bot_chat_id, limit=1)
+                if messages and messages[0].id != sent_message.id and messages[0].media:
+                    track_message = messages[0]
+                    break
+                await asyncio.sleep(1)
+
+            if not track_message:
+                return None
+
+            await self.client.delete_messages(bot_chat_id, [sent_message.id, track_message.id])
+
+            return track_message
+
+        except Exception as e:
+            return None
