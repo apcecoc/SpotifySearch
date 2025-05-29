@@ -370,8 +370,9 @@ class SpotifySearchMod(loader.Module):
             bot_chat = await self.client.get_entity(self.download_bot)
             bot_chat_id = bot_chat.id
 
-            await self.client.send_message(bot_chat_id, "/start")
+            start_message = await self.client.send_message(bot_chat_id, "/start")
             await asyncio.sleep(1)
+            start_response = await self.client.get_messages(bot_chat_id, limit=1)
 
             sent_message = await self.client.send_message(bot_chat_id, track_url)
 
@@ -384,11 +385,24 @@ class SpotifySearchMod(loader.Module):
                 await asyncio.sleep(1)
 
             if not track_message:
+                await self.client.delete_messages(bot_chat_id, [start_message.id, sent_message.id])
+                if start_response:
+                    await self.client.delete_messages(bot_chat_id, [start_response[0].id])
                 return None
 
-            await self.client.delete_messages(bot_chat_id, [sent_message.id, track_message.id])
+            messages_to_delete = [start_message.id, sent_message.id, track_message.id]
+            if start_response:
+                messages_to_delete.append(start_response[0].id)
+            await self.client.delete_messages(bot_chat_id, messages_to_delete)
 
             return track_message
 
         except Exception as e:
+            try:
+                messages_to_delete = [start_message.id, sent_message.id]
+                if start_response:
+                    messages_to_delete.append(start_response[0].id)
+                await self.client.delete_messages(bot_chat_id, messages_to_delete)
+            except:
+                pass
             return None
