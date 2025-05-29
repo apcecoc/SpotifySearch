@@ -8,7 +8,7 @@ import json
 import time
 import asyncio
 
-__version__ = (1, 0, 8)
+__version__ = (1, 0, 9)
 
 #        █████  ██████   ██████ ███████  ██████  ██████   ██████ 
 #       ██   ██ ██   ██ ██      ██      ██      ██    ██ ██      
@@ -365,17 +365,18 @@ class SpotifySearchMod(loader.Module):
             await call.edit(self.strings["download_error"].format(error=str(e)))
 
     async def download_via_bot(self, original_chat_id: int, track_url: str, track_name: str, artist_name: str, duration: int, is_podcast: bool):
-        """Скачивание трека"""
+        """Скачивание трека через бота @MusicsHuntersbot"""
         try:
             bot_chat = await self.client.get_entity(self.download_bot)
             bot_chat_id = bot_chat.id
+
             await self.client.send_message(bot_chat_id, "/start")
             await asyncio.sleep(1)
 
             sent_message = await self.client.send_message(bot_chat_id, track_url)
 
             track_message = None
-            for _ in range(20):
+            for _ in range(60):
                 messages = await self.client.get_messages(bot_chat_id, limit=1)
                 if messages and messages[0].id != sent_message.id and messages[0].media:
                     track_message = messages[0]
